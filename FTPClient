@@ -1,0 +1,175 @@
+<?php 
+Class FTPClient
+{
+	private $connectionId;
+	private $loginOk = false;
+	private $messageArray = array();
+ 
+    public function __construct($server = '') { 
+		$this->connectionId = ftp_connect($server);
+	}
+	
+	private function logMessage($message) {
+		$this->messageArray[] = $message;
+	}
+	
+	private function getLastSFTPError() {
+		return end($this->messageArray);
+	}
+	
+	public function getMessages(){
+		return $this->messageArray;
+	}
+	
+	public function login ($ftpUser, $ftpPassword, $isPassive = true){
+
+		// *** Login with username and password
+		$loginResult = ftp_login($this->connectionId, $ftpUser, $ftpPassword);
+		// *** Sets passive mode on/off (default off)
+		ftp_pasv($this->connectionId, $isPassive);
+		// *** Check connection
+		if ((!$this->connectionId) || (!$loginResult)) {
+			$this->logMessage('FTP connection has failed!');
+			$this->logMessage('Attempted to connect to ' . $server . ' for user ' . $ftpUser, true);
+			return false;
+		} else {
+			$this->logMessage('Connected to server, for user ' . $ftpUser);
+			$this->loginOk = true;
+			return true;
+		}
+	}
+	
+	public function mkdir($directory){
+		// *** If creating a directory is successful...
+		if (ftp_mkdir($this->connectionId, $directory)) {
+	 			$this->logMessage('Directory "' . $directory . '" created successfully');
+			return true;
+	 
+		} else {
+			// *** ...Else, FAIL.
+			$this->logMessage('Failed creating directory "' . $directory . '"');
+			return false;
+		}
+	}
+	
+	public function chdir($directory){
+		if (ftp_chdir($this->connectionId, $directory)) {
+			$this->logMessage('Current directory is now: ' . ftp_pwd($this->connectionId));
+			return true;
+		} else { 
+			$this->logMessage('Couldn\'t change directory');
+			return false;
+		}
+	}
+	
+	function file_exists($dir){ 
+		// Get the current working directory 
+		$origin = ftp_pwd($this->connectionId);
+		// Attempt to change directory, suppress errors 
+		if (@ftp_chdir($this->connectionId, $dir)){
+			// If the directory exists, set back to origin 
+			ftp_chdir($this->connectionId, $origin);    
+			return true; 
+		}
+		// Directory does not exist 
+		return false; 
+	}
+
+	
+	public function nlist($directory = '.', $parameters = '-la'){
+		// get contents of the current directory.
+		$origin = ftp_pwd($this->connectionId);
+		$contentsArray = ftp_nlist($this->connectionId, $directory);
+	 	return $contentsArray;
+	}
+	
+# TODO	
+	public function is_readable($file){
+		return true;
+	}
+	
+	/*
+	* Download file From to To
+	*/
+	public function downloadFile ($fileFrom, $fileTo){
+		// *** Set the transfer mode
+		$mode = $this->_get_file_mode($fileFrom);
+
+		// try to download $remote_file and save it to $handle
+		if (ftp_get($this->connectionId, $fileTo, $fileFrom, $mode, 0)) {
+	 
+			return true;
+			$this->logMessage(' file "' . $fileTo . '" successfully downloaded');
+		} else {
+	 
+			return false;
+			$this->logMessage('There was an error downloading file "' . $fileFrom . '" to "' . $fileTo . '"');
+		}
+	}
+	
+	/**
+	*	Read the file content
+	**/
+	public function get($file_name){
+		// *** Set the transfer mode
+		$mode = $this->_get_file_mode($file_name);
+		// try to read file
+		$read_file = $this->ftp_get_contents($this->connectionId, $file_name, $mode);
+		if ($read_file){
+			return $read_file;
+		} else {
+			return false;
+			$this->logMessage('There was an error downloading file.');
+		}
+	}
+
+	// Get the content of current file
+	function ftp_get_contents($ftp_stream, $remote_file, $mode, $resume_pos=null){
+		$pipes=stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+		if($pipes===false) return false;
+		if(!stream_set_blocking($pipes[1], 0)){
+			fclose($pipes[0]); fclose($pipes[1]);
+			return false;
+		}
+		$fail=false;
+		$data='';
+		if(is_null($resume_pos)){
+			$ret=ftp_nb_fget($ftp_stream, $pipes[0], $remote_file, $mode);
+		} else {
+			$ret=ftp_nb_fget($ftp_stream, $pipes[0], $remote_file, $mode, $resume_pos);
+		}
+		while($ret==FTP_MOREDATA){
+			while(!$fail && !feof($pipes[1])){
+				$r=fread($pipes[1], 8192);
+				if($r==='') break;
+				if($r===false){ $fail=true; break; }
+				$data.=$r;
+			}
+			$ret=ftp_nb_continue($ftp_stream);
+		}
+		while(!$fail && !feof($pipes[1])){
+			$r=fread($pipes[1], 8192);
+			if($r==='') break;
+			if($r===false){ $fail=true; break; }
+			$data.=$r;
+		}
+		fclose($pipes[0]); fclose($pipes[1]);
+		if($fail || $ret!=FTP_FINISHED) return false;
+		return $data;
+	}
+	
+	private function _get_file_mode($file_name){
+		$file_ext = explode(".",$file_name);
+		$file_ext = end($file_ext);
+		switch (strtolower($file_ext)){
+			case 'am':		case 'asp':	case 'bat':		case 'c':	case 'cfm':		case 'cgi':	case 'conf':
+			case 'cpp':		case 'css':	case 'dhtml':	case 'diz':	case 'h':		case 'hpp':	case 'htm':
+			case 'html':	case 'in':	case 'inc':		case 'js':	case 'm4':		case 'mak':	case 'nfs':
+			case 'nsi':		case 'pas':	case 'patch':	case 'php':	case 'php3':	case 'php4':case 'php5':
+			case 'phtml':	case 'pl':	case 'po':		case 'py':	case 'qmail':	case 'sh':	case 'shtml':
+			case 'sql':		case 'tcl':	case 'tpl':		case 'txt':	case 'vbs':		case 'xml':	case 'xrc':	case 'csv':
+				return FTP_ASCII;
+		}
+		return FTP_BINARY;
+	}
+}
